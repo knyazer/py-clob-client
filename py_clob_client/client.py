@@ -22,6 +22,7 @@ from .endpoints import (
     MID_POINT,
     ORDERS,
     POST_ORDER,
+    POST_ORDERS,
     PRICE,
     TIME,
     TRADES,
@@ -64,6 +65,7 @@ from .clob_types import (
     PartialCreateOrderOptions,
     BookParams,
     MarketOrderArgs,
+    PostOrdersArgs,
 )
 from .exceptions import PolyException
 from .http_helpers.helpers import (
@@ -392,7 +394,10 @@ class ClobClient:
 
         if order_args.price is None or order_args.price <= 0:
             order_args.price = self.calculate_market_price(
-                order_args.token_id, order_args.side, order_args.amount
+                order_args.token_id,
+                order_args.side,
+                order_args.amount,
+                order_args.order_type,
             )
 
         if not price_valid(order_args.price, tick_size):
@@ -418,6 +423,21 @@ class ClobClient:
                 neg_risk=neg_risk,
             ),
         )
+
+    def post_orders(self, args: list[PostOrdersArgs]):
+        """
+        Posts orders
+        """
+        self.assert_level_2_auth()
+        body = [
+            order_to_json(arg.order, self.creds.api_key, arg.orderType) for arg in args
+        ]
+        headers = create_level_2_headers(
+            self.signer,
+            self.creds,
+            RequestArgs(method="POST", request_path=POST_ORDERS, body=body),
+        )
+        return post("{}{}".format(self.host, POST_ORDERS), headers=headers, data=body)
 
     def post_order(self, order, orderType: OrderType = OrderType.GTC):
         """
@@ -731,7 +751,9 @@ class ClobClient:
         """
         return get("{}{}{}".format(self.host, GET_MARKET_TRADES_EVENTS, condition_id))
 
-    def calculate_market_price(self, token_id: str, side: str, amount: float) -> float:
+    def calculate_market_price(
+        self, token_id: str, side: str, amount: float, order_type: OrderType
+    ) -> float:
         """
         Calculates the matching price considering an amount and the current orderbook
         """
@@ -741,21 +763,37 @@ class ClobClient:
         if side == "BUY":
             if book.asks is None:
                 raise Exception("no match")
-            return self.builder.calculate_buy_market_price(book.asks, amount)
+            return self.builder.calculate_buy_market_price(
+                book.asks, amount, order_type
+            )
         else:
             if book.bids is None:
                 raise Exception("no match")
-            return self.builder.calculate_sell_market_price(book.bids, amount)
+            return self.builder.calculate_sell_market_price(
+                book.bids, amount, order_type
+            )
 
-    def get_price_history_with_interval(self, token_id: str, interval: str, fidelity: str):
+    def get_price_history_with_interval(
+        self, token_id: str, interval: str, fidelity: str
+    ):
         """
         Get the price history for a given token_id with interval.
         startTs/endTs are mutually exclusive to interval.
         """
-        return get("{}{}?market={}&interval={}&fidelity={}".format(self.host, GET_PRICE_HISTORY, token_id, interval, fidelity))
-    
-    def get_price_history_with_timestamps(self, token_id: str, startTs: int, endTs: int, fidelity: str):
+        return get(
+            "{}{}?market={}&interval={}&fidelity={}".format(
+                self.host, GET_PRICE_HISTORY, token_id, interval, fidelity
+            )
+        )
+
+    def get_price_history_with_timestamps(
+        self, token_id: str, startTs: int, endTs: int, fidelity: str
+    ):
         """
         Get the price history for a given token_id with timestamps
         """
-        return get("{}{}?market={}&startTs={}&endTs={}&fidelity={}".format(self.host, GET_PRICE_HISTORY, token_id, startTs, endTs, fidelity))
+        return get(
+            "{}{}?market={}&startTs={}&endTs={}&fidelity={}".format(
+                self.host, GET_PRICE_HISTORY, token_id, startTs, endTs, fidelity
+            )
+        )
